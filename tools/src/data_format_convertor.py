@@ -12,9 +12,7 @@ CSV_FORMAT = "csv"
 SAS_FORMAT = "sas7bdat"
 
 
-def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, delimiter: str = ",",
-                          encoding: str = "utf-8",
-                          partitionColumns: Optional[List[str]] = None):
+def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, **kwargs):
     """
     This function takes an input folder, scans all the file in it, if its extension is csv or sas, it will be converted
     to parquet
@@ -41,7 +39,7 @@ def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, d
     for root, dirs, files in walk(rootPath):
         for file in files:
             inFilePathStr = path.join(root, file)
-            convertFileToParquet(spark, inFilePathStr, outDirPath)
+            convertFileToParquet(spark, inFilePathStr, outDirPath, **kwargs)
 
 
 def convertFileToParquet(spark: SparkSession, inFilePathStr: str, outDirPath: str, **kwargs):
@@ -112,7 +110,7 @@ def convertCsvToParquet(spark: SparkSession, filePath: str, outPath: str, delimi
     :rtype:
     """
 
-    if checkFileFormat(filePath, "csv"):
+    if not checkFileFormat(filePath, "csv"):
         print("Please enter a valid csv file path")
         raise ValueError(f"The given path is not in csv format")
 
@@ -167,19 +165,29 @@ def checkCSVEncoding(filePath: str):
 
 
 def main():
+    # define the argparser arguments
     parser = argparse.ArgumentParser(description="This CLI can help you to convert sas or csv files to parquet format")
-    parser.add_argument("inputDirPath", help="The root directory path which contains the csv or sas files")
-    parser.add_argument("outputDirPath", help="The root directory path which contains the output parquet files")
+    parser.add_argument("inputPath", help="The root directory path which contains the csv or sas files")
+    parser.add_argument("outputPath", help="The root directory path which contains the output parquet files")
     parser.add_argument("--isFile", help="By default this option is set to False, If this option is enabled "
                                          "by putting True, the application takes one single file path as input")
-    parser.add_argument("--delimiter", "If the input csv files does not use the default delimiter `,`, user need to"
-                                       "provide the delimiter value")
-    parser.add_argument("--encoding", "if the input csv file does not use the default encoding value `utf-8`, user "
-                                      "need to provide the encoding value")
+    parser.add_argument("--delimiter", help="If the input csv files does not use the default delimiter ',', user need "
+                                            "to provide the delimiter value")
+    parser.add_argument("--encoding", help="if the input csv file does not use the default encoding value utf-8, user "
+                                           "need to provide the encoding value")
+    parser.add_argument("--partitionColumns", help="If no partition columns is provided, use the default hash "
+                                                   "partition of the spark. If a column name is given, then use "
+                                                   "the range partition. Note if the given column does not exist "
+                                                   "in the target file, an error will be raised")
 
-    if len(sys.argv) != 3:
-        print("You must enter a directory path which indicates the input data")
-        sys.exit(1)
+    # parse the arguments
+    args = parser.parse_args()
+    inputPath = args.inputPath
+    outputPath = args.outputPath
+    isFile = args.isFile == "True" or "False"
+    delimiter = args.delimiter or ","
+    encoding = args.encoding or "utf-8"
+    partitionColumns = str(args.partitionColumns).split(",") or None
 
     # get dependent jar path
     rootLibPath = pathlib.Path.cwd().parent.parent / "libs"
@@ -198,6 +206,13 @@ def main():
         .config("spark.sql.files.maxPartitionBytes", "256mb") \
         .config("spark.jars", jarPath) \
         .appName("DataFormatConvertor").getOrCreate()
+
+    if isFile:
+        convertFileToParquet(spark, inputPath, outputPath, delimiter=delimiter, encoding=encoding,
+                             partitionColumns=partitionColumns)
+    else:
+        convertFilesToParquet(spark, inputPath, outputPath, delimiter=delimiter, encoding=encoding,
+                              partitionColumns=partitionColumns)
 
 
 if __name__ == "__main__":
