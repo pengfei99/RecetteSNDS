@@ -4,6 +4,7 @@ import pytest
 from pyspark.sql.session import SparkSession
 from tools.src.data_format_convertor import convertSasToParquet, checkCSVEncoding, convertFilesToParquet, \
     convertCsvToParquet, convertFileToParquet
+import subprocess
 
 
 @pytest.fixture
@@ -40,6 +41,12 @@ def test_convertFileToParquet_withPartitionColumn(sparkSession):
     convertFileToParquet(sparkSession, inputFile, outputPath, partitionColumns=partColumns)
 
 
+def test_convertFileToParquet_withCsv(sparkSession):
+    inputFile = "/home/pengfei/git/RecetteSNDS/data/bad_encoding.csv"
+    outputPath = "/tmp"
+    convertFileToParquet(sparkSession, inputFile, outputPath, delimiter=";", encoding="windows-1252")
+
+
 def test_convertFilesToParquet(sparkSession):
     inputFile = "/home/pengfei/git/RecetteSNDS/data"
     outputPath = "/tmp/generated_parquet_files"
@@ -52,6 +59,28 @@ def test_convertSasToParquet(sparkSession):
     convertSasToParquet(sparkSession, inputFile, outputPath)
 
 
+def test_convertCsvToParquet_withDelimiterEncoding(sparkSession):
+    inputFile = "/home/pengfei/git/RecetteSNDS/data/bad_encoding.csv"
+    outputPath = "/tmp/bad_encoding"
+    convertCsvToParquet(sparkSession, inputFile, outputPath, delimiter=";", encoding="windows-1252")
+
+
+def test_convertCsvToParquet_withPartition(sparkSession):
+    inputFile = "/home/pengfei/git/RecetteSNDS/data/bad_encoding.csv"
+    outputPath = "/tmp/bad_encoding"
+    partColumns = ["Taille"]
+    convertCsvToParquet(sparkSession, inputFile, outputPath, delimiter=";", encoding="windows-1252",
+                        partitionColumns=partColumns)
+
+
 def test_checkCSVEncoding():
     inputFile = "/home/pengfei/git/RecetteSNDS/data/bad_encoding.csv"
     checkCSVEncoding(filePath=inputFile)
+
+
+def test_runWithArgparse_withFolderMode():
+    appPath = "/home/pengfei/git/RecetteSNDS/tools/src/data_format_convertor.py"
+    inputPath = "/home/pengfei/git/RecetteSNDS/data"
+    outputPath = "/tmp/data"
+    command = f"python {appPath} {inputPath} {outputPath}"
+    subprocess.run(command, shell=True)
