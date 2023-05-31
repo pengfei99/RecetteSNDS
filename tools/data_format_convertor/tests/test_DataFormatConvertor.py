@@ -2,7 +2,7 @@ import pathlib
 
 import pytest
 from pyspark.sql.session import SparkSession
-from tools.src.data_format_convertor import convertSasToParquet, checkCSVEncoding, convertFilesToParquet, \
+from tools.data_format_convertor.src.data_format_convertor import convertSasToParquet, checkCSVEncoding, convertFilesToParquet, \
     convertCsvToParquet, convertFileToParquet
 import subprocess
 

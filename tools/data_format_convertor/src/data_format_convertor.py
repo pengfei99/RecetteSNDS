@@ -187,7 +187,8 @@ def checkCSVEncoding(filePath: str):
 def main():
     # define the argparser arguments
     parser = argparse.ArgumentParser(description="This CLI can help you to convert sas or csv files to parquet format")
-    parser.add_argument("inputPath", help="The root directory path which contains the csv or sas files")
+    parser.add_argument("inputPath", help="The root directory path which contains the csv or sas files, it can be"
+                                          " a folder or a single file path  ")
     parser.add_argument("outputPath", help="The root directory path which contains the output parquet files")
     # parser.add_argument("--isFile", help="By default this option is set to False, If this option is enabled "
     #                                      "by putting True, the application takes one single file path as input")
