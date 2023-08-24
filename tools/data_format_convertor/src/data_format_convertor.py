@@ -1,5 +1,7 @@
+import os.path
 import shutil
 import sys
+import time
 from os import path, walk
 from typing import Optional, List
 
@@ -35,12 +37,18 @@ logger = logging.getLogger('')
 logger.addHandler(file_handler)
 logger.addHandler(stream_handler)
 
+# Set up retry time and delay
+MAX_RETRY = 3
+RETRY_DELAY = 5  # seconds
 
-def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, **kwargs):
+
+def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, overwrite: bool = False, **kwargs):
     """
     This function takes an input folder, scans all the file in it, if its extension is csv or sas, it will be converted
     to parquet. It can take a list of implicite argument such as delimiter, encoding, partitionColumns.
 
+    :param overwrite:
+    :type overwrite:
     :param spark:
     :type spark:
     :param rootPath:
@@ -57,23 +65,39 @@ def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, *
     for root, dirs, files in walk(rootPath):
         for file in files:
             inFilePathStr = path.join(root, file)
-            convertFileToParquet(spark, inFilePathStr, outDirPath, **kwargs)
+            convertFileToParquet(spark, inFilePathStr, outDirPath, overwrite, **kwargs)
 
 
-def convertFileToParquet(spark: SparkSession, inFilePathStr: str, outDirPath: str, **kwargs):
+def convertFileToParquet(spark: SparkSession, inFilePathStr: str, outDirPath: str, overwrite: bool = False, **kwargs):
     inFilePath = pathlib.Path(inFilePathStr)
     outputPath = path.join(outDirPath, str(inFilePath.name.split(".", 1)[0]))
-    fileExtension = str(inFilePath.suffix).lower()
-    if fileExtension == f".{CSV_FORMAT}":
-        convertCsvToParquet(spark, inFilePathStr, outputPath, **kwargs)
-
-    elif fileExtension == f".{SAS_FORMAT}":
-        if 'partitionColumns' in kwargs:
-            convertSasToParquet(spark, inFilePathStr, outputPath, partitionColumns=kwargs['partitionColumns'])
-        else:
-            convertSasToParquet(spark, inFilePathStr, outputPath)
+    if os.path.exists(outDirPath) and not overwrite:
+        logger.info(f"The target out put parquet file {outDirPath} already exists. Skip the conversion of "
+                    f"file {inFilePathStr}. If you want to overwrite the existing parquet file, please enable "
+                    "the overwrite option")
     else:
-        raise ValueError(f"The given file format {fileExtension} is not supported yet")
+        fileExtension = str(inFilePath.suffix).lower()
+        for retry in range(MAX_RETRY + 1):
+            try:
+                if fileExtension == f".{CSV_FORMAT}":
+                    convertCsvToParquet(spark, inFilePathStr, outputPath, **kwargs)
+                elif fileExtension == f".{SAS_FORMAT}":
+                    if 'partitionColumns' in kwargs:
+                        convertSasToParquet(spark, inFilePathStr, outputPath,
+                                            partitionColumns=kwargs['partitionColumns'])
+                    else:
+                        convertSasToParquet(spark, inFilePathStr, outputPath)
+                else:
+                    logger.warning(f"The given file format {fileExtension} is not supported yet. "
+                                   f"Skip file {inFilePathStr}")
+                break
+            except Exception as e:
+                logger.error(f"Failed to convert the file {inFilePathStr}: {e}")
+            if retry < MAX_RETRY:
+                logger.info(f"Retrying in  {RETRY_DELAY} seconds ...")
+                time.sleep(RETRY_DELAY)
+            else:
+                logger.info("Max retries reached, stop ALL.")
 
 
 def convertSasToParquet(spark: SparkSession, filePath: str, outPath: str,
@@ -201,7 +225,7 @@ def main():
                                                    "partition of the spark. If a column name is given, then use "
                                                    "the range partition. Note if the given column does not exist "
                                                    "in the target file, an error will be raised")
-
+    parser.add_argument("--overwrite", action="store_true", help="Enable overwrite mode")
     # parse the arguments
     args = parser.parse_args()
     inputPath = args.inputPath
@@ -237,16 +261,20 @@ def main():
     logging.info("Start file conversion")
     if path.isfile(inputPath):
         if partColumns:
-            convertFileToParquet(spark, inputPath, outputPath, delimiter=delimiter, encoding=encoding,
+            convertFileToParquet(spark, inputPath, outputPath, overwrite=args.overwrite,
+                                 delimiter=delimiter, encoding=encoding,
                                  partitionColumns=partColumns)
         else:
-            convertFileToParquet(spark, inputPath, outputPath, delimiter=delimiter, encoding=encoding)
+            convertFileToParquet(spark, inputPath, outputPath, overwrite=args.overwrite,
+                                 delimiter=delimiter, encoding=encoding)
     else:
         if partColumns:
-            convertFilesToParquet(spark, inputPath, outputPath, delimiter=delimiter, encoding=encoding,
+            convertFilesToParquet(spark, inputPath, outputPath, overwrite=args.overwrite,
+                                  delimiter=delimiter, encoding=encoding,
                                   partitionColumns=partColumns)
         else:
-            convertFilesToParquet(spark, inputPath, outputPath, delimiter=delimiter, encoding=encoding)
+            convertFilesToParquet(spark, inputPath, outputPath, overwrite=args.overwrite,
+                                  delimiter=delimiter, encoding=encoding)
     logging.info("End file conversion")
 
 
