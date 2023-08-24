@@ -10,7 +10,7 @@ import subprocess
 @pytest.fixture
 def sparkSession():
     # get dependent jar path
-    rootLibPath = pathlib.Path.cwd().parent.parent / "libs"
+    rootLibPath = pathlib.Path.cwd().parent.parent.parent / "libs"
     parsoPath = rootLibPath / "parso-2.0.11.jar"
     sparkSasPath = rootLibPath / "spark-sas7bdat-3.0.0-s_2.12.jar"
     jarPathList = [str(parsoPath), str(sparkSasPath)]
@@ -30,7 +30,7 @@ def sparkSession():
 
 def test_convertFileToParquet_withSas(sparkSession):
     inputFile = "/home/pengfei/git/RecetteSNDS/data/airline.sas7bdat"
-    outputPath = "/tmp"
+    outputPath = "/tmp/airline"
     convertFileToParquet(sparkSession, inputFile, outputPath)
 
 
