@@ -12,7 +12,11 @@ The dependencies in [requirements.txt](tools/data_format_convertor/requirements.
 # To use it, you need to first install the dependencies 
 pip install -r requirements.txt
 
-# below is an example on how to run the tool
+# below is an example on how to run the tool which takes on input file
+# the overwrite option can overwrite existing file in output path 
+python data_format_convertor.py /input/data/air.sas.7bdat /output/data --overwrite
+
+# below is an example on how to run the tool which takes multiple input files
 python data_format_convertor.py /input/data /output/data --delimiter ";" --encoding windows-1252 --partitionColumns Type,Taille
 
 # for help on the argument 
