@@ -5,7 +5,7 @@ import time
 from os import path, walk
 from typing import Optional, List
 
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, DataFrame
 import argparse
 import pathlib
 import chardet
@@ -59,7 +59,7 @@ def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, o
     :rtype:
     """
     if not path.isdir(rootPath):
-        logging.warning("The given path is not a directory")
+        logger.warning("The given path is not a directory")
         sys.exit(1)
 
     for root, dirs, files in walk(rootPath):
@@ -116,22 +116,76 @@ def convertSasToParquet(spark: SparkSession, filePath: str, outPath: str,
     :return:
     :rtype:
     """
-    logging.info(f"Start to convert sas file {filePath} to parquet file at {outPath}")
+    logger.info(f"Start to convert sas file {filePath} to parquet file at {outPath}")
     if not checkFileFormat(filePath, SAS_FORMAT):
-        logging.warning("Please enter a valid sas file path")
+        logger.warning("Please enter a valid sas file path")
     try:
         df = spark.read \
             .format("com.github.saurfang.sas.spark") \
             .load(filePath, forceLowercaseNames=True, inferLong=True)
         df.show(5)
     except Exception as e:
-        logging.error(f"Can't read the given path as a sas file with below exception {e}")
+        logger.error(f"Can't read the given path as a sas file with below exception {e}")
         raise ValueError(f"The given path is not in sas format")
     if partitionColumns:
         df.write.partitionBy(partitionColumns).mode("overwrite").parquet(outPath)
     else:
         df.write.mode("overwrite").parquet(outPath)
-    logging.info(f"Finish the sas file conversion")
+
+    # validate the output parquet file, if it is not valid, delete the parquet file
+    validateOutputParquetFile(spark, filePath, df, outPath)
+
+    logger.info(f"Finish the sas file conversion")
+
+
+def validateOutputParquetFile(spark: SparkSession, originFilePath: str,
+                              originDf: DataFrame, parquetFilePath: str) -> bool:
+    """
+    This function validate the output parquet file with the origin file by using:
+    - row number
+    - column number
+    - data schema
+    :param originFilePath:
+    :type originFilePath:
+    :param spark:
+    :type spark:
+    :param originDf:
+    :type originDf:
+    :param parquetFilePath:
+    :type parquetFilePath:
+    :return:
+    :rtype:
+    """
+    originRowNum = originDf.count()
+    originColNum = len(originDf.columns)
+    originSchema = originDf.schema
+
+    newDf = spark.read.parquet(parquetFilePath)
+    newRowNum = newDf.count()
+    newColNum = len(originDf.columns)
+    newSchema = newDf.schema
+    if originRowNum != newRowNum:
+        logger.error(f"The output parquet file of {originFilePath} has different row numbers")
+        valid = False
+    elif originColNum != newColNum:
+        logger.error(f"The output parquet file of {originFilePath} has different column numbers")
+        valid = False
+    elif originSchema != newSchema:
+        logger.error(f"The output parquet file of {originFilePath} has different schema")
+        valid = False
+    else:
+        logger.info(f"The output parquet file is validated with the origin file {originFilePath}.\n"
+                    f"Row number: {newRowNum}\n"
+                    f"Column number: {newRowNum}\n"
+                    f"Schema: {newSchema}")
+        valid = True
+    if not valid:
+        try:
+            shutil.rmtree(parquetFilePath)
+            logger.info(f"The generated parquet file {parquetFilePath} is not valid, it has been deleted")
+        except Exception as e:
+            logger.error(f"The generated parquet file {parquetFilePath} is not valid. But unable to delete it: {e}")
+    return valid
 
 
 def convertCsvToParquet(spark: SparkSession, filePath: str, outPath: str, delimiter: str = ",", encoding: str = "utf-8",
@@ -153,9 +207,9 @@ def convertCsvToParquet(spark: SparkSession, filePath: str, outPath: str, delimi
     :return: None
     :rtype:
     """
-    logging.info(f"Start to convert csv file {filePath} to parquet file at {outPath}")
+    logger.info(f"Start to convert csv file {filePath} to parquet file at {outPath}")
     if not checkFileFormat(filePath, CSV_FORMAT):
-        logging.error("Please enter a valid csv file path")
+        logger.error("Please enter a valid csv file path")
         raise ValueError(f"The given path is not in csv format")
 
     try:
@@ -167,19 +221,32 @@ def convertCsvToParquet(spark: SparkSession, filePath: str, outPath: str, delimi
             .csv(filePath)
         df.show(5)
     except Exception as e:
-        logging.error(f"Can't read the given path as a csv file with below exception {e}")
+        logger.error(f"Can't read the given path as a csv file with below exception {e}")
         raise ValueError(f"The given path is not in csv format")
     if partitionColumns:
         df.write.partitionBy(partitionColumns).mode("overwrite").parquet(outPath)
     else:
         df.write.mode("overwrite").parquet(outPath)
-    logging.info(f"Finish the csv file conversion")
+
+    # validate the output parquet file, if it is not valid, delete the parquet file
+    validateOutputParquetFile(spark, filePath, df, outPath)
+
+    logger.info(f"Finish the csv file conversion")
 
 
-def checkFileFormat(filePath: str, expectedFormat: str):
+def checkFileFormat(filePath: str, expectedFormat: str) -> bool:
+    """
+    This function checks the file format with a given format
+    :param filePath:
+    :type filePath:
+    :param expectedFormat:
+    :type expectedFormat:
+    :return:
+    :rtype:
+    """
     inFile = pathlib.Path(filePath)
     if not inFile.is_file():
-        logging.warning(f"The given path {filePath} is not a file")
+        logger.warning(f"The given path {filePath} is not a file")
         return False
 
     if expectedFormat.lower() == CSV_FORMAT:
@@ -200,7 +267,7 @@ def checkCSVEncoding(filePath: str):
         result = chardet.detect(rawData)
         encoding = result['encoding']
         confidence = result['confidence']
-        logging.info(f"Inferred encoding value: {encoding}, with confidence: {confidence}")
+        logger.info(f"Inferred encoding value: {encoding}, with confidence: {confidence}")
         if confidence > 0.6:
             return encoding
         else:
@@ -238,10 +305,10 @@ def main():
         partColumns = str(args.partitionColumns).split(",")
     else:
         partColumns = None
-    logging.info(f"User input delimiter value: '{delimiter}', encoding value: {encoding}, "
-                 f"partition columns : {partColumns}")
+    logger.info(f"User input delimiter value: '{delimiter}', encoding value: {encoding}, "
+                f"partition columns : {partColumns}")
     # get dependent jar path
-    rootLibPath = pathlib.Path.cwd().parent.parent / "libs"
+    rootLibPath = pathlib.Path.cwd().parent.parent.parent / "libs"
     parsoPath = rootLibPath / "parso-2.0.11.jar"
     sparkSasPath = rootLibPath / "spark-sas7bdat-3.0.0-s_2.12.jar"
     jarPathList = [str(parsoPath), str(sparkSasPath)]
@@ -251,14 +318,20 @@ def main():
     # the shuffle partition number should be the same as the executor number
     # The default max spark partition size is 128MB, which may result in too many small partition.
     # This lead to small task that slows down the performance.
-    logging.info("Building spark session")
-    spark = SparkSession.builder.master("local[*]") \
-        .config("spark.driver.memory", "8g") \
-        .config("spark.sql.shuffle.partitions", "8") \
-        .config("spark.sql.files.maxPartitionBytes", "256mb") \
-        .config("spark.jars", jarPath) \
-        .appName("DataFormatConvertor").getOrCreate()
-    logging.info("Start file conversion")
+    logger.info("Building spark session")
+    try:
+        spark = SparkSession.builder.master("local[*]") \
+            .config("spark.driver.memory", "8g") \
+            .config("spark.sql.shuffle.partitions", "8") \
+            .config("spark.sql.files.maxPartitionBytes", "256mb") \
+            .config("spark.jars", jarPath) \
+            .appName("DataFormatConvertor").getOrCreate()
+        logger.info("The spark session is created successfully")
+    except Exception as e:
+        logger.error(f"Failed to create spark session: {e}\n "
+                     f"Stop all")
+        sys.exit(1)
+    logger.info("Start file conversion")
     if path.isfile(inputPath):
         if partColumns:
             convertFileToParquet(spark, inputPath, outputPath, overwrite=args.overwrite,
@@ -275,7 +348,7 @@ def main():
         else:
             convertFilesToParquet(spark, inputPath, outputPath, overwrite=args.overwrite,
                                   delimiter=delimiter, encoding=encoding)
-    logging.info("End file conversion")
+    logger.info("End file conversion")
 
 
 if __name__ == "__main__":
