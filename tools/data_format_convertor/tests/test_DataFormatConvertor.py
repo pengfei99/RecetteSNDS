@@ -2,8 +2,9 @@ import pathlib
 
 import pytest
 from pyspark.sql.session import SparkSession
-from tools.data_format_convertor.src.data_format_convertor import convertSasToParquet, checkCSVEncoding, convertFilesToParquet, \
-    convertCsvToParquet, convertFileToParquet
+from tools.data_format_convertor.src.data_format_convertor import convertSasToParquet, checkCSVEncoding, \
+    convertFilesToParquet, \
+    convertCsvToParquet, convertFileToParquet, determinePartitionNumber
 import subprocess
 
 
@@ -86,3 +87,15 @@ def test_runWithArgparse_withFolderMode():
     outputPath = "/tmp/data"
     command = f'python {appPath} {inputPath} {outputPath} --delimiter ";" --encoding windows-1252'
     subprocess.run(command, shell=True)
+
+
+def test_determinePartitionNumber_withSmallFile():
+    filePath = "/home/pengfei/git/RecetteSNDS/data/airline.sas7bdat"
+    nb = determinePartitionNumber(filePath)
+    assert nb == 1
+
+
+def test_determinePartitionNumber_withBigFile():
+    filePath = "/home/pengfei/data_set/nyc_taxi/nyc_taxi.csv"
+    nb = determinePartitionNumber(filePath)
+    assert nb == 85

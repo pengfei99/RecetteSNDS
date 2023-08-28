@@ -41,6 +41,8 @@ logger.addHandler(stream_handler)
 MAX_RETRY = 3
 RETRY_DELAY = 5  # seconds
 
+PARTITION_SIZE = 256
+
 
 def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, overwrite: bool = False, **kwargs):
     """
@@ -124,6 +126,10 @@ def convertSasToParquet(spark: SparkSession, filePath: str, outPath: str,
             .format("com.github.saurfang.sas.spark") \
             .load(filePath, forceLowercaseNames=True, inferLong=True)
         df.show(5)
+        # determine the partition number
+        partitionNum = determinePartitionNumber(filePath)
+        # repartition the dataframe with the given number
+        df = df.repartition(partitionNum)
     except Exception as e:
         logger.error(f"Can't read the given path as a sas file with below exception {e}")
         raise ValueError(f"The given path is not in sas format")
@@ -136,6 +142,25 @@ def convertSasToParquet(spark: SparkSession, filePath: str, outPath: str,
     validateOutputParquetFile(spark, filePath, df, outPath)
 
     logger.info(f"Finish the sas file conversion")
+
+
+def determinePartitionNumber(filePath: str) -> int:
+    """
+    This function takes a file path, and calculate a partition number based on the given partition size
+    :param filePath:
+    :type filePath:
+    :return:
+    :rtype:
+    """
+    # get the file size in bytes
+    fileSize = os.path.getsize(filePath)
+    # the partition size in bytes
+    partitionSize = PARTITION_SIZE * 1024 * 1024
+    partitionNum = int(fileSize / partitionSize)
+    # if the partition number is too small, set it to 1
+    if partitionNum <= 0:
+        partitionNum = 1
+    return partitionNum
 
 
 def validateOutputParquetFile(spark: SparkSession, originFilePath: str,
@@ -288,6 +313,10 @@ def main():
                                             "considers `;` as separator also, you need to add quotes to semicolon")
     parser.add_argument("--encoding", help="if the input csv file does not use the default encoding value utf-8, user "
                                            "need to provide the encoding value")
+    parser.add_argument("--partitionColumns", help="If no partition columns is provided, use the default hash "
+                                                   "partition of the spark. If a column name is given, then use "
+                                                   "the range partition. Note if the given column does not exist "
+                                                   "in the target file, an error will be raised")
     parser.add_argument("--partitionColumns", help="If no partition columns is provided, use the default hash "
                                                    "partition of the spark. If a column name is given, then use "
                                                    "the range partition. Note if the given column does not exist "
