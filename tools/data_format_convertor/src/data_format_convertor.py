@@ -361,6 +361,7 @@ def main():
                      f"Stop all")
         sys.exit(1)
     logger.info("Start file conversion")
+    # if input is a file call function with convertFileToParquet
     if path.isfile(inputPath):
         if partColumns:
             convertFileToParquet(spark, inputPath, outputPath, overwrite=args.overwrite,
@@ -369,6 +370,7 @@ def main():
         else:
             convertFileToParquet(spark, inputPath, outputPath, overwrite=args.overwrite,
                                  delimiter=delimiter, encoding=encoding)
+    # if the input is a directory
     else:
         if partColumns:
             convertFilesToParquet(spark, inputPath, outputPath, overwrite=args.overwrite,
