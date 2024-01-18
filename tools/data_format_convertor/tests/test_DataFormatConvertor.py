@@ -89,6 +89,16 @@ def test_runWithArgparse_withFolderMode():
     subprocess.run(command, shell=True)
 
 
+def test_runWithArgparse_withFolderMode_withBadSasFile():
+    # python data_format_convertor.py /home/pengfei/git/RecetteSNDS/data /tmp/data --delimiter ";"
+    # --encoding windows-1252 --partitionColumns Type,Taille
+    appPath = "/home/pengfei/git/RecetteSNDS/tools/src/data_format_convertor.py"
+    inputPath = "/home/pengfei/git/RecetteSNDS/data"
+    outputPath = "/tmp/data"
+    command = f'python {appPath} {inputPath} {outputPath} --delimiter ";" --encoding windows-1252 --overwrite'
+    subprocess.run(command, shell=True)
+
+
 def test_determinePartitionNumber_withSmallFile():
     filePath = "/home/pengfei/git/RecetteSNDS/data/airline.sas7bdat"
     nb = determinePartitionNumber(filePath)
