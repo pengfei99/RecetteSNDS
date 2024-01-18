@@ -15,27 +15,34 @@ CSV_FORMAT = "csv"
 SAS_FORMAT = "sas7bdat"
 LOG_LEVEL = logging.INFO
 LOG_FILE_PATH = "/tmp/format_convertor/app.log"
+ERR_LOG_FILE_PATH = "/tmp/format_convertor/error.log"
 LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
 
 # Set up logging configuration
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
 
 # Create file handler
-file_handler = logging.FileHandler(LOG_FILE_PATH)
-file_handler.setLevel(LOG_LEVEL)
+output_file_handler = logging.FileHandler(LOG_FILE_PATH)
+output_file_handler.setLevel(LOG_LEVEL)
 file_formatter = logging.Formatter(LOG_FORMAT)
-file_handler.setFormatter(file_formatter)
+output_file_handler.setFormatter(file_formatter)
 
 # Create stream handler (console)
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(LOG_LEVEL)
+output_stream_handler = logging.StreamHandler()
+output_stream_handler.setLevel(LOG_LEVEL)
 stream_formatter = logging.Formatter(LOG_FORMAT)
-stream_handler.setFormatter(stream_formatter)
+output_stream_handler.setFormatter(stream_formatter)
+
+# create error log handler
+error_handler = logging.FileHandler(ERR_LOG_FILE_PATH)
+error_handler.setFormatter(file_formatter)
+error_handler.setLevel(logging.ERROR)
 
 # Get the root logger and add the handlers
 logger = logging.getLogger('')
-logger.addHandler(file_handler)
-logger.addHandler(stream_handler)
+logger.addHandler(output_file_handler)
+logger.addHandler(output_stream_handler)
+logger.addHandler(error_handler)
 
 # Set up retry time and delay
 MAX_RETRY = 3
@@ -63,14 +70,30 @@ def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, o
     if not path.isdir(rootPath):
         logger.warning("The given path is not a directory")
         sys.exit(1)
-
+    totalFileNum = 0
+    successFileNum = 0
+    failedFileNum = 0
     for root, dirs, files in walk(rootPath):
         for file in files:
+            totalFileNum += 1
             inFilePathStr = path.join(root, file)
-            convertFileToParquet(spark, inFilePathStr, outDirPath, overwrite, **kwargs)
+            if convertFileToParquet(spark, inFilePathStr, outDirPath, overwrite, **kwargs):
+                successFileNum += 1
+            else:
+                failedFileNum += 1
+    logger.info(f"""
+                   ################################Summery###############################
+                   Total File number: {totalFileNum}
+                   Success conversion file number: {successFileNum}
+                   Failed conversion file number: {failedFileNum}
+                  """)
 
 
-def convertFileToParquet(spark: SparkSession, inFilePathStr: str, outDirPath: str, overwrite: bool = False, **kwargs):
+def convertFileToParquet(spark: SparkSession,
+                         inFilePathStr: str,
+                         outDirPath: str,
+                         overwrite: bool = False,
+                         **kwargs) -> bool:
     inFilePath = pathlib.Path(inFilePathStr)
     outputPath = path.join(outDirPath, str(inFilePath.name.split(".", 1)[0]))
     if os.path.exists(outDirPath) and not overwrite:
@@ -82,17 +105,21 @@ def convertFileToParquet(spark: SparkSession, inFilePathStr: str, outDirPath: st
         for retry in range(MAX_RETRY + 1):
             try:
                 if fileExtension == f".{CSV_FORMAT}":
-                    convertCsvToParquet(spark, inFilePathStr, outputPath, **kwargs)
+                    if convertCsvToParquet(spark, inFilePathStr, outputPath, **kwargs):
+                        return True
                 elif fileExtension == f".{SAS_FORMAT}":
                     if 'partitionColumns' in kwargs:
-                        convertSasToParquet(spark, inFilePathStr, outputPath,
-                                            partitionColumns=kwargs['partitionColumns'])
+                        if convertSasToParquet(spark, inFilePathStr, outputPath,
+                                               partitionColumns=kwargs['partitionColumns']):
+                            return True
                     else:
-                        convertSasToParquet(spark, inFilePathStr, outputPath)
+                        if convertSasToParquet(spark, inFilePathStr, outputPath):
+                            return True
                 else:
                     logger.warning(f"The given file format {fileExtension} is not supported yet. "
                                    f"Skip file {inFilePathStr}")
-                break
+                    return False
+
             except Exception as e:
                 logger.error(f"Failed to convert the file {inFilePathStr}: {e}")
             if retry < MAX_RETRY:
@@ -100,13 +127,16 @@ def convertFileToParquet(spark: SparkSession, inFilePathStr: str, outDirPath: st
                 time.sleep(RETRY_DELAY)
             else:
                 logger.info("Max retries reached, stop ALL.")
+                return False
 
 
 def convertSasToParquet(spark: SparkSession, filePath: str, outPath: str,
-                        partitionColumns: Optional[List[str]] = None) -> None:
+                        partitionColumns: Optional[List[str]] = None, localFs: bool = True) -> bool:
     """
     This function read a sas file and convert it to parquet. If the given sas file can't be read by spark, an exception
     is raised
+    :param localFs: specify spark read data from local file system
+    :type localFs:
     :param partitionColumns:
     :type partitionColumns:
     :param spark:
@@ -121,12 +151,16 @@ def convertSasToParquet(spark: SparkSession, filePath: str, outPath: str,
     logger.info(f"Start to convert sas file {filePath} to parquet file at {outPath}")
     if not checkFileFormat(filePath, SAS_FORMAT):
         logger.warning("Please enter a valid sas file path")
+    if localFs:
+        outPath = f"file://{outPath}"
+        sparkInPath = f"file://{filePath}"
+
     try:
         df = spark.read \
             .format("com.github.saurfang.sas.spark") \
-            .load(filePath, forceLowercaseNames=True, inferLong=True)
+            .load(sparkInPath, forceLowercaseNames=True, inferLong=True)
         df.show(5)
-        # determine the partition number
+        # determine the partition number by calculating the file size
         partitionNum = determinePartitionNumber(filePath)
         # repartition the dataframe with the given number
         df = df.repartition(partitionNum)
@@ -135,18 +169,23 @@ def convertSasToParquet(spark: SparkSession, filePath: str, outPath: str,
         raise ValueError(f"The given path is not in sas format")
     if partitionColumns:
         df.write.partitionBy(partitionColumns).mode("overwrite").parquet(outPath)
+
     else:
         df.write.mode("overwrite").parquet(outPath)
 
     # validate the output parquet file, if it is not valid, delete the parquet file
-    validateOutputParquetFile(spark, filePath, df, outPath)
-
-    logger.info(f"Finish the sas file conversion")
+    if validateOutputParquetFile(spark, filePath, df, outPath):
+        logger.info(f"Finish the sas file conversion with Success")
+        return True
+    else:
+        logger.info(f"Finish the sas file conversion with error")
+        return False
 
 
 def determinePartitionNumber(filePath: str) -> int:
     """
     This function takes a file path, and calculate a partition number based on the given partition size
+    It only works on local file system
     :param filePath:
     :type filePath:
     :return:
@@ -214,7 +253,7 @@ def validateOutputParquetFile(spark: SparkSession, originFilePath: str,
 
 
 def convertCsvToParquet(spark: SparkSession, filePath: str, outPath: str, delimiter: str = ",", encoding: str = "utf-8",
-                        partitionColumns: Optional[List[str]] = None) -> None:
+                        partitionColumns: Optional[List[str]] = None) -> bool:
     """
     This function read a csv file (not partitioned), then convert it to parquet
     :param partitionColumns: The list of column names which we want to partition the data
@@ -236,8 +275,9 @@ def convertCsvToParquet(spark: SparkSession, filePath: str, outPath: str, delimi
     if not checkFileFormat(filePath, CSV_FORMAT):
         logger.error("Please enter a valid csv file path")
         raise ValueError(f"The given path is not in csv format")
-
+    outPath = f"file://{outPath}"
     try:
+        filePath = f"file://{filePath}"
         df = spark.read \
             .option("header", True) \
             .option("inferSchema", True) \
@@ -254,9 +294,12 @@ def convertCsvToParquet(spark: SparkSession, filePath: str, outPath: str, delimi
         df.write.mode("overwrite").parquet(outPath)
 
     # validate the output parquet file, if it is not valid, delete the parquet file
-    validateOutputParquetFile(spark, filePath, df, outPath)
-
-    logger.info(f"Finish the csv file conversion")
+    if validateOutputParquetFile(spark, filePath, df, outPath):
+        logger.info(f"Finish the csv file conversion with success")
+        return True
+    else:
+        logger.info(f"Finish the csv file conversion with error")
+        return False
 
 
 def checkFileFormat(filePath: str, expectedFormat: str) -> bool:
@@ -313,10 +356,6 @@ def main():
                                             "considers `;` as separator also, you need to add quotes to semicolon")
     parser.add_argument("--encoding", help="if the input csv file does not use the default encoding value utf-8, user "
                                            "need to provide the encoding value")
-    parser.add_argument("--partitionColumns", help="If no partition columns is provided, use the default hash "
-                                                   "partition of the spark. If a column name is given, then use "
-                                                   "the range partition. Note if the given column does not exist "
-                                                   "in the target file, an error will be raised")
     parser.add_argument("--partitionColumns", help="If no partition columns is provided, use the default hash "
                                                    "partition of the spark. If a column name is given, then use "
                                                    "the range partition. Note if the given column does not exist "
