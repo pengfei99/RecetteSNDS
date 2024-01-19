@@ -72,20 +72,27 @@ def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, o
         sys.exit(1)
     totalFileNum = 0
     successFileNum = 0
+    successFilesPath = []
     failedFileNum = 0
+    failedFilesPath = []
     for root, dirs, files in walk(rootPath):
         for file in files:
             totalFileNum += 1
             inFilePathStr = path.join(root, file)
             if convertFileToParquet(spark, inFilePathStr, outDirPath, overwrite, **kwargs):
                 successFileNum += 1
+                successFilesPath.append(inFilePathStr)
             else:
                 failedFileNum += 1
+                failedFilesPath.append(inFilePathStr)
     logger.info(f"""
                    ################################Summery###############################
                    Total File number: {totalFileNum}
                    Success conversion file number: {successFileNum}
+                   Success conversion file paths: {successFilesPath}
+                   
                    Failed conversion file number: {failedFileNum}
+                   Failed conversion file paths: {failedFilesPath}
                   """)
 
 
