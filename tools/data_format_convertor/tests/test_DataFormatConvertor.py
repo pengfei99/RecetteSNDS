@@ -4,7 +4,7 @@ import pytest
 from pyspark.sql.session import SparkSession
 from tools.data_format_convertor.src.data_format_convertor import convertSasToParquet, checkCSVEncoding, \
     convertFilesToParquet, \
-    convertCsvToParquet, convertFileToParquet, determinePartitionNumber
+    convertCsvToParquet, convertFileToParquet, determinePartitionNumber, getSasSchema
 import subprocess
 
 
@@ -109,3 +109,8 @@ def test_determinePartitionNumber_withBigFile():
     filePath = "/home/pengfei/data_set/nyc_taxi/nyc_taxi.csv"
     nb = determinePartitionNumber(filePath)
     assert nb == 85
+
+
+def test_getSasSchema(sparkSession):
+    filePath = "/home/pengfei/git/RecetteSNDS/data/airline.sas7bdat"
+    getSasSchema(sparkSession, filePath)

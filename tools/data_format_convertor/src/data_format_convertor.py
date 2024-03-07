@@ -4,8 +4,10 @@ import sys
 import time
 from os import path, walk
 from typing import Optional, List
+import pyreadstat
 
 from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.types import StructType
 import argparse
 import pathlib
 import chardet
@@ -49,6 +51,15 @@ MAX_RETRY = 3
 RETRY_DELAY = 5  # seconds
 
 PARTITION_SIZE = 256
+
+
+def getSasSchema(spark: SparkSession, filePath: str) -> StructType:
+    pdf, meta = pyreadstat.read_sas7bdat(filePath, row_offset=1, row_limit=5)
+    # this needs to be removed for >=spark 3.4
+    # https://stackoverflow.com/questions/75926636/databricks-issue-while-creating-spark-data-frame-from-pandas
+    pdf.iteritems = pdf.items
+    sparkDf = spark.createDataFrame(pdf)
+    return sparkDf.schema
 
 
 def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, overwrite: bool = False, **kwargs):
