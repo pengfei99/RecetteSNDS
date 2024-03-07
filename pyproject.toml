@@ -10,6 +10,7 @@ readme = "README.md"
 python = "^3.8"
 pyspark = "3.3.1"
 chardet = "^5.1.0"
+pyreadstat = "^1.2.6"
 
 [tool.poetry.dev-dependencies]
 pytest= "^7.2.0"
