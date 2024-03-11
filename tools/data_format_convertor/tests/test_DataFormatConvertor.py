@@ -2,7 +2,7 @@ import pathlib
 
 import pytest
 from pyspark.sql.session import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, BooleanType, DateType
 
 from tools.data_format_convertor.src.data_format_convertor import convertSasToParquet, checkCSVEncoding, \
     convertFilesToParquet, \
@@ -118,7 +118,7 @@ def test_getSasSchema(sparkSession):
     getSasSchema(sparkSession, filePath)
 
 
-def test_convertDFtoNewSchema(sparkSession):
+def test_convertDFtoNewSchema_withValidDataSet(sparkSession):
     data = [("John", 170.23), ("Alice", 185.32), ("Bob", 179.35)]
     schema = StructType([StructField("Name", StringType(), True),
                          StructField("Height", DoubleType(), True)])
@@ -128,6 +128,23 @@ def test_convertDFtoNewSchema(sparkSession):
     new_schema = StructType([
         StructField("Full_Name", StringType(), True),
         StructField("Height", IntegerType(), True)  # Changing Age from IntegerType to StringType
+    ])
+    newDf = convertDFtoNewSchema(df, new_schema)
+
+    newDf.printSchema()
+    newDf.show()
+
+
+def test_convertDFtoNewSchema_withValidDataSetAndBadNewSchema(sparkSession):
+    data = [("John", 170.23), ("Alice", 185.32), ("Bob", 179.35)]
+    schema = StructType([StructField("Name", StringType(), True),
+                         StructField("Height", DoubleType(), True)])
+
+    df = sparkSession.createDataFrame(data, schema)
+    df.show()
+    new_schema = StructType([
+        StructField("Full_Name", StringType(), True),
+        StructField("Height", DateType(), True)  # Changing Age from IntegerType to StringType
     ])
     newDf = convertDFtoNewSchema(df, new_schema)
 

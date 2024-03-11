@@ -74,7 +74,8 @@ def getSasSchema(spark: SparkSession, filePath: str) -> StructType:
 def convertDFtoNewSchema(df: DataFrame, newSchema: StructType) -> DataFrame:
     """
     This function convert an existing dataframe with a new schema. Note that the new schema column order must be
-    identical to the origin dataframe. The type cast may fail, because some type can't be cast
+    identical to the origin dataframe. The type cast may fail, because some type can't be cast. When cannot cast
+    type happens, an AnalysisException will be raised.
     :param df:
     :type df:
     :param newSchema:
