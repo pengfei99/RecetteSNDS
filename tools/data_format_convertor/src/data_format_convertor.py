@@ -54,12 +54,41 @@ PARTITION_SIZE = 256
 
 
 def getSasSchema(spark: SparkSession, filePath: str) -> StructType:
+    """
+    This function takes a sas file, and returns the schema of the spark dataframe
+    :param spark:
+    :type spark:
+    :param filePath:
+    :type filePath:
+    :return:
+    :rtype:
+    """
     pdf, meta = pyreadstat.read_sas7bdat(filePath, row_offset=1, row_limit=5)
     # this needs to be removed for >=spark 3.4
     # https://stackoverflow.com/questions/75926636/databricks-issue-while-creating-spark-data-frame-from-pandas
     pdf.iteritems = pdf.items
     sparkDf = spark.createDataFrame(pdf)
     return sparkDf.schema
+
+
+def convertDFtoNewSchema(df: DataFrame, newSchema: StructType) -> DataFrame:
+    """
+    This function convert an existing dataframe with a new schema. Note that the new schema column order must be
+    identical to the origin dataframe. The type cast may fail, because some type can't be cast
+    :param df:
+    :type df:
+    :param newSchema:
+    :type newSchema:
+    :return:
+    :rtype:
+    """
+    # Generate the select expression dynamically based on the new schema
+    select_expr = [df[col_name].cast(newSchema.fields[i].dataType).alias(newSchema.fields[i].name)
+                   for i, col_name in enumerate(df.columns)]
+
+    # Apply the select expression to the DataFrame
+    newDf = df.select(select_expr)
+    return newDf
 
 
 def convertFilesToParquet(spark: SparkSession, rootPath: str, outDirPath: str, overwrite: bool = False, **kwargs):
@@ -176,7 +205,7 @@ def convertSasToParquet(spark: SparkSession, filePath: str, outPath: str,
     try:
         df = spark.read \
             .format("com.github.saurfang.sas.spark") \
-            .load(sparkInPath, forceLowercaseNames=True, inferLong=True)
+            .load(sparkInPath)
         df.show(5)
         # determine the partition number by calculating the file size
         partitionNum = determinePartitionNumber(filePath)
